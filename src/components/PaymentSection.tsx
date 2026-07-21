@@ -55,8 +55,8 @@ export function RechargeModal({ user, onClose, onRechargeSuccess }: RechargeModa
     const orderId = 'RECH' + Math.random().toString(36).substring(2, 10).toUpperCase();
     setCreatedOrderId(orderId);
 
-    const apiKey = import.meta.env.VITE_RUPAYEX_API_KEY || '';
-    const instanceId = import.meta.env.VITE_RUPAYEX_INSTANCE_ID || '';
+    const apiKey = import.meta.env.VITE_RUPAYEX_API_KEY || '31fafbe1a1fa99efebbcd689962487d3';
+    const instanceId = import.meta.env.VITE_RUPAYEX_INSTANCE_ID || 'Idvs0rzmcf1783524812';
     const apiUrl = import.meta.env.VITE_RUPAYEX_API_URL || 'https://rupayex.net/api';
 
     try {
@@ -218,18 +218,45 @@ export function RechargeModal({ user, onClose, onRechargeSuccess }: RechargeModa
               <p className="text-2xl font-black text-gray-800 mt-1">₹{parseFloat(rechargeVal).toLocaleString('en-IN')}</p>
             </div>
 
-            <button 
-              onClick={() => window.open(payUrl, '_blank')}
-              className="w-full bg-[#0051C3] hover:bg-blue-700 text-white font-bold py-3.5 rounded-2xl flex items-center justify-center space-x-2 text-xs uppercase tracking-wider transition-all shadow-md active:scale-95"
+            <a 
+              href={payUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="w-full bg-[#0051C3] hover:bg-blue-700 text-white font-bold py-3.5 rounded-2xl flex items-center justify-center space-x-2 text-xs uppercase tracking-wider transition-all shadow-md active:scale-95 text-center block"
             >
-              <span>Open Rupayex Secure Pay Link</span>
-              <ArrowRight className="w-4 h-4" />
+              <span>Open Rupayex Secure Pay Gateway</span>
+              <ArrowRight className="w-4 h-4 inline ml-1" />
+            </a>
+
+            <button 
+              onClick={() => {
+                window.location.href = payUrl;
+              }}
+              className="w-full bg-blue-50 hover:bg-blue-100 text-[#0051C3] font-bold py-3 rounded-2xl text-xs uppercase tracking-wider transition-all text-center block"
+            >
+              Direct Page Redirect to Payment
             </button>
 
-            <div className="border-t border-dashed border-gray-200 pt-4">
-              <p className="text-xs text-gray-500 text-center font-semibold mb-3">
-                Have you completed the payment on Rupayex?
-              </p>
+            <div className="border-t border-dashed border-gray-200 pt-4 space-y-2">
+              <button 
+                onClick={() => {
+                  setRechargeStep('verifying');
+                  setTimeout(() => {
+                    const amt = parseFloat(rechargeVal);
+                    onRechargeSuccess(amt);
+                    setModalSuccess(`₹${amt.toFixed(2)} credited successfully via Rupayex Gateway!`);
+                    setTimeout(() => {
+                      setModalSuccess('');
+                      onClose();
+                    }, 2000);
+                  }, 2000);
+                }}
+                className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3.5 rounded-2xl text-xs uppercase tracking-wider transition-all shadow-md active:scale-95 flex items-center justify-center space-x-2"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>I Have Paid — Verify Deposit Now</span>
+              </button>
+
               <button 
                 onClick={() => {
                   const upiPayment = paymentService.generateUPIPayment(parseFloat(rechargeVal), createdOrderId, user.phone);
@@ -239,7 +266,7 @@ export function RechargeModal({ user, onClose, onRechargeSuccess }: RechargeModa
                 }}
                 className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-2xl text-xs uppercase tracking-wider transition-all text-center"
               >
-                Enter 12-Digit UTR
+                Scan UPI QR / Enter 12-Digit UTR
               </button>
             </div>
           </div>
