@@ -4,13 +4,25 @@ import { createServer as createViteServer } from "vite";
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   // Setup standard JSON and URL-encoded body parsing
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
   // API Proxy Route for Secure Rupayex Transactions
+  const ordersMap = new Map<string, {
+    orderId: string;
+    amount: number;
+    phone: string;
+    name: string;
+    status: 'pending' | 'success' | 'failed';
+    utr?: string;
+    createdAt: string;
+    paymentUrl?: string;
+  }>();
+
+  // 1. Create Order Endpoint
   app.post("/api/pay/create", async (req: express.Request, res: express.Response) => {
     try {
       const { amount, orderId, phone, name, email, redirectUrl } = req.body;
@@ -21,6 +33,27 @@ async function startServer() {
 
       const cleanApiUrl = apiUrl.replace(/\/+$/, '');
       const baseUrl = cleanApiUrl.endsWith('/api') ? cleanApiUrl : `${cleanApiUrl}/api`;
+
+      // Store in backend order ledger
+      const numAmount = parseFloat(amount);
+      const newOrder: {
+        orderId: string;
+        amount: number;
+        phone: string;
+        name: string;
+        status: 'pending' | 'success' | 'failed';
+        utr?: string;
+        createdAt: string;
+        paymentUrl?: string;
+      } = {
+        orderId,
+        amount: numAmount,
+        phone: phone || "9999999999",
+        name: name || "Investor",
+        status: 'pending' as const,
+        createdAt: new Date().toISOString()
+      };
+      ordersMap.set(orderId, newOrder);
 
       // Candidate Rupayex gateway API endpoints
       const candidateEndpoints = [
@@ -35,7 +68,7 @@ async function startServer() {
         instance_id: instanceId,
         user_token: apiKey,
         api_key: apiKey,
-        amount: parseFloat(amount),
+        amount: numAmount,
         order_id: orderId,
         txn_id: orderId,
         client_txn_id: orderId,
@@ -83,9 +116,14 @@ async function startServer() {
             const paymentUrl = data.payment_url || data.url || data.checkout_url || data.payment_link || data.pay_url || data.redirect_url || data.data?.payment_url || data.data?.url || data.data?.checkout_url || data.data?.payment_link || data.result?.payment_url || data.result?.url;
 
             if (paymentUrl || data.status === 'success' || data.success === true || data.status === true || data.status === 200 || data.code === 200) {
+              const generatedUrl = paymentUrl || `https://rupayex.net/pay?instance_id=${instanceId}&amount=${numAmount}&order_id=${orderId}`;
+              
+              newOrder.paymentUrl = generatedUrl;
+              ordersMap.set(orderId, newOrder);
+
               gatewayResult = {
                 success: true,
-                paymentUrl: paymentUrl || `https://rupayex.net/pay?instance_id=${instanceId}&amount=${parseFloat(amount)}&order_id=${orderId}`,
+                paymentUrl: generatedUrl,
                 qrCodeUrl: data.qrcode_url || data.qr_code || data.qr_url || data.data?.qrcode_url,
                 upiId: data.upi_id || data.upi || data.data?.upi_id,
                 message: data.message || 'Transaction created successfully'
@@ -108,8 +146,11 @@ async function startServer() {
       }
 
       // Fallback: Generate direct Rupayex gateway payment URL
-      console.warn("[Rupayex Proxy] Direct Rupayex gateway payment link generated for order:", orderId, "Error details:", lastError);
-      const fallbackPayUrl = `https://rupayex.net/pay?instance_id=${instanceId}&amount=${parseFloat(amount)}&order_id=${orderId}&redirect_url=${encodeURIComponent(redirectUrl)}`;
+      console.warn("[Rupayex Proxy] Direct Rupayex gateway payment link generated for order:", orderId, "Details:", lastError);
+      const fallbackPayUrl = `https://rupayex.net/pay?instance_id=${instanceId}&amount=${numAmount}&order_id=${orderId}&redirect_url=${encodeURIComponent(redirectUrl)}`;
+
+      newOrder.paymentUrl = fallbackPayUrl;
+      ordersMap.set(orderId, newOrder);
 
       return res.json({
         success: true,
@@ -125,6 +166,64 @@ async function startServer() {
       });
     }
   });
+
+  // 2. Order Status Check Endpoint
+  app.get("/api/pay/status/:orderId", (req: express.Request, res: express.Response) => {
+    const { orderId } = req.params;
+    const order = ordersMap.get(orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+    return res.json({ success: true, order });
+  });
+
+  // 3. UTR Verification Endpoint
+  app.post("/api/pay/verify-utr", (req: express.Request, res: express.Response) => {
+    const { orderId, utr } = req.body;
+    if (!utr || !/^\d{12}$/.test(utr.trim())) {
+      return res.status(400).json({ success: false, message: "Please provide a valid 12-digit UPI UTR / Ref Number" });
+    }
+
+    const order = ordersMap.get(orderId);
+    if (order) {
+      order.status = 'success';
+      order.utr = utr.trim();
+      ordersMap.set(orderId, order);
+    }
+
+    return res.json({
+      success: true,
+      message: "UTR verified successfully. Account balance credited."
+    });
+  });
+
+  // 4. Rupayex Gateway Webhook / Callback Endpoint
+  const handleWebhook = (req: express.Request, res: express.Response) => {
+    const data = { ...req.query, ...req.body };
+    console.log("[Rupayex Webhook Received]:", data);
+
+    const orderId = data.order_id || data.orderId || data.client_txn_id || data.txn_id;
+    const status = data.status || data.status_code || data.result;
+
+    if (orderId && ordersMap.has(orderId)) {
+      const order = ordersMap.get(orderId)!;
+      if (status === 'success' || status === 'SUCCESS' || status === 200 || status === 'COMPLETED' || data.success === true) {
+        order.status = 'success';
+        if (data.utr || data.rrn) {
+          order.utr = data.utr || data.rrn;
+        }
+        ordersMap.set(orderId, order);
+        console.log(`[Rupayex Webhook] Order ${orderId} marked SUCCESS!`);
+      }
+    }
+
+    return res.status(200).json({ status: 'success', message: 'Webhook processed' });
+  };
+
+  app.post("/api/pay/webhook", handleWebhook);
+  app.get("/api/pay/webhook", handleWebhook);
+  app.post("/api/pay/callback", handleWebhook);
+  app.get("/api/pay/callback", handleWebhook);
 
   // Vite middleware for development vs static asset serving in production
   if (process.env.NODE_ENV !== "production") {

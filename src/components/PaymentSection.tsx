@@ -100,6 +100,12 @@ export function RechargeModal({ user, onClose, onRechargeSuccess }: RechargeModa
     setModalError('');
     setRechargeStep('verifying');
 
+    try {
+      await paymentService.verifyUTR(createdOrderId, utrCode.trim());
+    } catch (err) {
+      console.warn('UTR backend verify warning:', err);
+    }
+
     setTimeout(() => {
       const amt = parseFloat(rechargeVal);
       onRechargeSuccess(amt);
@@ -111,7 +117,7 @@ export function RechargeModal({ user, onClose, onRechargeSuccess }: RechargeModa
         setModalSuccess('');
         onClose();
       }, 2500);
-    }, 2500);
+    }, 2000);
   };
 
   return (

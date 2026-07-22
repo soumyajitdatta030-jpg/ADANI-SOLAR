@@ -61,6 +61,36 @@ export const paymentService = {
   },
 
   /**
+   * Verifies UTR payment on backend
+   */
+  async verifyUTR(orderId: string, utr: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await fetch('/api/pay/verify-utr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId, utr })
+      });
+      const data = await response.json();
+      return data;
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Failed to verify UTR on backend server' };
+    }
+  },
+
+  /**
+   * Checks order status from backend server
+   */
+  async checkOrderStatus(orderId: string): Promise<{ success: boolean; order?: any }> {
+    try {
+      const response = await fetch(`/api/pay/status/${orderId}`);
+      const data = await response.json();
+      return data;
+    } catch {
+      return { success: false };
+    }
+  },
+
+  /**
    * Generates a native, client-side UPI deep-link QR code if the API fails or is unconfigured
    */
   generateUPIPayment(amount: number, orderId: string, phone: string): { upiLink: string; upiId: string; qrCodeUrl: string } {
